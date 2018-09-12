@@ -1,5 +1,4 @@
 #!/bin/bash
-
 ########################################
 # Usage
 ########################################
@@ -17,7 +16,6 @@ usage() {
 		 major      Generates a tag for the next major version and echos it to the screen
 		 minor      Generates a tag for the next minor version and echos it to the screen
 		 patch|next Generates a tag for the next patch version and echos it to the screen
-		 update     Check for updates and install if there are any available
 		 help       This message
 
 	EOF
@@ -28,228 +26,8 @@ usage() {
 # Helper functions
 ########################################
 
-# Joins elements in an array with a separator
-# Takes a separator and array of elements to join
-#
-# Adapted from code by gniourf_gniourf (http://stackoverflow.com/a/23673883/1819350)
-#
-# Example
-#   $ arr=("red car" "blue bike")
-#   $ join " and " "${arr[@]}"
-#   red car and blue bike
-#   $ join $'\n' "${arr[@]}"
-#   red car
-#   blue bike
-#
-function join() {
-    local separator=$1
-    local elements=$2
-    shift 2 || shift $(($#))
-    printf "%s" "$elements${@/#/$separator}"
-}
-
-# Gets input from the console
-# Takes a string message and optionally a string default (not shown if secure is set) and a boolean secure flag for passwords
-#
-# Example
-#   $ get_input "Enter a password" "123456" true
-#   Enter a password (defaults to 1234) (not visible):
-#   $ password=${RETVAL}
-#
-function get_input() {
-    local message=$1
-    local default=$2
-    local secure=$3
-    local args="-r"
-    local output=
-    local msg_notvisible=
-    local msg_default=
-    if [ -n "${default}" ]
-    then
-        if [ "${secure}" = true ]
-        then
-            default_secure="unchanged"
-        else
-            default_secure=\"${default}\"
-        fi
-        msg_default=" (defaults to ${default_secure})"
-    fi
-    if [ "${secure}" = true ]
-    then
-        args="${args} -s"
-        msg_notvisible=" (not visible)"
-    fi
-    while :
-    do
-        echo -n "${message}${msg_default}${msg_notvisible}: "
-        read ${args} input
-        if [ "${secure}" = true ]
-        then
-            echo
-        fi
-        if [ -n "${input}" ]
-        then
-            output=${input}
-            break
-        elif [ -n "${default}" ]
-        then
-            output=${default}
-            break
-        fi
-    done
-    RETVAL=${output}
-}
-
-# Resolves a path to a real path
-# Takes a string path
-#
-# Example
-#   $ echo $(resolve-path "/var/./www/../log/messages.log")
-#   /var/log/messages.log
-#
-resolve-path() {
-    local path="$1"
-    if pushd "$path" > /dev/null 2>&1
-    then
-        path=$(pwd -P)
-        popd > /dev/null
-    elif [ -L "$path" ]
-    then
-        path="$(ls -l "$path" | sed 's#.* /#/#g')"
-        path="$(resolve-path $(dirname "$path"))/$(basename "$path")"
-    fi
-    echo "$path"
-}
-
 function basename-git() {
-    echo $(basename "$1" | tr '-' ' ' | sed 's/.sh$//g')
-}
-
-########################################
-# Update functions
-########################################
-
-update-force-enabled() {
-    [ -n "${UPDATE_CHECK_FORCE}" ] && [ ${UPDATE_CHECK_FORCE} -eq 1 ]
-    return $?
-}
-
-update-check() {
-    local dir="$1"
-    if [ -d "${dir}/.git" ]
-    then
-        (cd "${dir}" && git fetch && git fetch --tags) > /dev/null 2>&1
-        local version=$(cd "${dir}" && git tag | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$" | sort -t. -k 1,1n -k 2,2n -k 3,3n | tail -1)
-        if update-force-enabled || [ $(cd "${dir}" && git rev-list --left-right HEAD...${version} | grep "^>" | wc -l | sed 's/ //g') -gt 0 ]
-        then
-            echo ${version}
-            return 0
-        fi
-    fi
-    return 1
-}
-
-update-silent() {
-    if [ "$1" != "${ARG_NOUPDATE}" ] && [ ${UPDATE_CHECK} -eq 1 ]
-    then
-        update true
-    fi
-}
-
-update() {
-    silent=$1
-
-    local status=1
-    local date_curr=$(date "+%Y-%m-%d")
-
-    mkdir -p ${DIR_DATA}
-    echo ${date_curr} > "${FILE_UPDATE}"
-
-    if update-force-enabled
-    then
-        echo "Warning: Forcing update check (UPDATE_CHECK_FORCE=1)"
-        UPDATE_CHECK_INTERVAL_DAYS=0
-    fi
-
-    if [ -n "$silent" ]
-    then
-        local time_curr=""
-        local time_prev=""
-
-        # Try GNU date
-        local date_cmd="date -d"
-        time_curr=$(${date_cmd} "${date_curr}" "+%s" 2> /dev/null)
-        # Otherwise fall back to OS specific args (and cache command)
-        if [ $? -eq 1 ]
-        then
-            case "$OSTYPE" in
-                darwin*|bsd*)
-                    date_cmd="date -j -f %Y-%m-%d"
-                    time_curr=$(${date_cmd} "${date_curr}" "+%s")
-                ;;
-                *)
-                    echo 'Error: unable to convert date using `date -d "'${date_curr}'" "+%s"` on '${OSTYPE}'.'
-                    return 1
-                ;;
-            esac
-        fi
-
-        local time_check=$((${time_curr} - ${UPDATE_CHECK_INTERVAL_DAYS} * 86400))
-        if [ -f "${FILE_UPDATE}" ]
-        then
-            time_prev=$(${date_cmd} "$(cat ${FILE_UPDATE} | tr -d $'\n')" "+%s")
-        else
-            time_prev=${time_check}
-        fi
-
-        if [ ${time_check} -lt ${time_prev}  ]
-        then
-            return 1
-        fi
-    fi
-
-    if ! $(which git > /dev/null)
-    then
-        if [ -z "$silent" ]
-        then
-            echo "Error: Unable to update - git is not installed"
-        fi
-        return 1
-    fi
-
-    local dir="$(dirname $(resolve-path "$0"))"
-    if [ ! -d "${dir}/.git" ]
-    then
-        if [ -z "$silent" ]
-        then
-            echo "Error: Unable to update - cannot find git repository"
-        fi
-        return 1
-    fi
-
-    version=$(update-check "${dir}")
-    if [ $? -gt 0 ]
-    then
-        if [ -z "$silent" ]
-        then
-            echo "No updates found"
-        fi
-        return 0
-    fi
-
-    get_input "New version ${version} found. Update (y/n)?" "y"
-    do_update="$(echo ${RETVAL} | tr '[:upper:]' '[:lower:]')"
-    if [ "${do_update}" == "y" ] || [ "${do_update}" == "yes" ]
-    then
-        if [ -n "$silent" ]
-        then
-            echo -e "Updating. Rerun your command with this new version:\n\n$(basename-git $0) ${ARGS}"
-        fi
-        # Disown this subshell to allow this script to close and avoid permission denied errors due to file locking
-        ( sleep 1 && cd ${dir} && git checkout ${version} > /dev/null 2>&1 && ./install.sh ) &
-        disown
-        exit
-    fi
+    basename "$1" | tr '-' ' ' | sed 's/.sh$//g'
 }
 
 ########################################
@@ -277,18 +55,19 @@ plugin-list() {
     local plugin_dir=
     local plugin_type=
     local total=${#dirs[*]}
-    for (( i=0; i <= $(( $total-1 )); i++ ))
+    for (( i=0; i <= $((total-1)); i++ ))
     do
         plugin_type=${types[${i}]}
         plugin_dir="${dirs[${i}]}/.git-semver/plugins"
         if [ -d "${plugin_dir}" ]
         then
-            find "${plugin_dir}" -maxdepth 1 -type f -exec test -x "{}" \; -exec echo "${plugin_type},{}" \;
+            find "${plugin_dir}" -maxdepth 1 -type f -exec echo "${plugin_type},{}" \;
         fi
     done
 }
 
 plugin-run() {
+    # shellcheck disable=SC2155
     local plugins="$(plugin-list)"
     local version_new="$1"
     local version_current="$2"
@@ -296,16 +75,15 @@ plugin-run() {
     local type=
     local typel=
     local path=
-    local file=
     local name=
     for i in ${plugins}
     do
         type=${i%%,*}
-        typel=$(echo ${type} | tr '[:upper:]' '[:lower:]')
+        typel=$(echo "${type}" | tr '[:upper:]' '[:lower:]')
         path=${i##*,}
-        name=$(basename ${path})
-        #name=${file%.*}
-        ${path} "${version_new}" "${version_current}" "${GIT_HASH}" "${GIT_BRANCH}" "${DIR_ROOT}" | plugin-output "${type}" "${name}"
+        name=$(basename "${path}")
+        ${path} "${version_new}" "${version_current}" "${GIT_HASH}" "${GIT_BRANCH}" "${DIR_ROOT}" 2>&1 |
+            plugin-output "${type}" "${name}"
         RETVAL=${PIPESTATUS[0]}
         case ${RETVAL} in
             0)
@@ -329,15 +107,19 @@ plugin-run() {
 }
 
 plugin-debug() {
+    # shellcheck disable=SC2155
     local version=$(version-get)
-    local major=$(version-parse-major ${version})
-    local minor=$(version-parse-minor ${version})
-    local patch=$(version-parse-patch ${version})
+    # shellcheck disable=SC2155
+    local major=$(version-parse-major "${version}")
+    # shellcheck disable=SC2155
+    local minor=$(version-parse-minor "${version}")
+    # shellcheck disable=SC2155
+    local patch=$(version-parse-patch "${version}")
     if [ "" == "$version" ]
     then
         local new=0.1.0
     else
-        local new=${major}.${minor}.$(($patch + 1))
+        local new=${major}.${minor}.$((patch+1))
     fi
     plugin-run "$new" "$version"
 }
@@ -347,62 +129,72 @@ plugin-debug() {
 ########################################
 
 version-parse-major() {
-    echo $1 | cut -d "." -f1
+    echo "$1" | cut -d "." -f1
 }
 
 version-parse-minor() {
-    echo $1 | cut -d "." -f2
+    echo "$1" | cut -d "." -f2
 }
 
 version-parse-patch() {
-    echo $1 | cut -d "." -f3
+    echo "$1" | cut -d "." -f3
 }
 
 version-get() {
-    local version=$(git tag | grep "^${VERSION_PREFIX}[0-9]\+\.[0-9]\+\.[0-9]\+$" | sed 's/^${VERSION_PREFIX}//' | sort -t. -k 1,1n -k 2,2n -k 3,3n | tail -1)
+    # shellcheck disable=SC2155
+    local version=$(git tag | grep "^${VERSION_PREFIX}[0-9]\+\.[0-9]\+\.[0-9]\+$" | sed "s/^${VERSION_PREFIX}//" | sort -t. -k 1,1n -k 2,2n -k 3,3n | tail -1)
     if [ "" == "${version}" ]
     then
         return 1
     else
-        echo ${version}
+        echo "${version}"
     fi
 }
 
 version-major() {
+    # shellcheck disable=SC2155
     local version=$(version-get)
-    local major=$(version-parse-major ${version})
+    # shellcheck disable=SC2155
+    local major=$(version-parse-major "${version}")
     if [ "" == "$version" ]
     then
         local new=${VERSION_PREFIX}1.0.0
     else
-        local new=${VERSION_PREFIX}$((${major} + 1)).0.0
+        local new=${VERSION_PREFIX}$((major+1)).0.0
     fi
     version-do "$new" "$version"
 }
 
 version-minor() {
+    # shellcheck disable=SC2155
     local version=$(version-get)
-    local major=$(version-parse-major ${version})
-    local minor=$(version-parse-minor ${version})
+    # shellcheck disable=SC2155
+    local major=$(version-parse-major "${version}")
+    # shellcheck disable=SC2155
+    local minor=$(version-parse-minor "${version}")
     if [ "" == "$version" ]
     then
         local new=${VERSION_PREFIX}0.1.0
     else
-        local new=${VERSION_PREFIX}${major}.$((${minor} + 1)).0
+        local new=${VERSION_PREFIX}${major}.$((minor+1)).0
     fi
     version-do "$new" "$version"
 }
 
 version-patch() {
+    # shellcheck disable=SC2155
     local version=$(version-get)
-    local major=$(version-parse-major ${version})
-    local minor=$(version-parse-minor ${version})
-    local patch=$(version-parse-patch ${version})
+    # shellcheck disable=SC2155
+    local major=$(version-parse-major "${version}")
+    # shellcheck disable=SC2155
+    local minor=$(version-parse-minor "${version}")
+    # shellcheck disable=SC2155
+    local patch=$(version-parse-patch "${version}")
     if [ "" == "$version" ]
     then
         local new=${VERSION_PREFIX}0.1.0
     else
-        local new=${VERSION_PREFIX}${major}.${minor}.$(($patch + 1))
+        local new=${VERSION_PREFIX}${major}.${minor}.$((patch+1))
     fi
     version-do "$new" "$version"
 }
@@ -410,9 +202,15 @@ version-patch() {
 version-do() {
     local new="$1"
     local version="$2"
+    local sign="${GIT_SIGN:-0}"
+    local cmd="git tag"
+    if [ "$sign" == "1" ]
+    then
+        cmd="$cmd -as -m $new"
+    fi
     if plugin-run "$new" "$version"
     then
-        git tag "$new" && echo "$new"
+        $cmd "$new" && echo "$new"
     fi
 }
 
@@ -426,16 +224,12 @@ readonly DIR_HOME="${HOME}"
 # Use XDG Base Directories if possible
 # (see http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html)
 DIR_CONF="${XDG_CONFIG_HOME:-${HOME}}/.git-semver"
-DIR_DATA="${XDG_DATA_HOME:-${HOME}}/.git-semver"
-
-# Set default config
-UPDATE_CHECK=1
-UPDATE_CHECK_INTERVAL_DAYS=1
 
 # Set (and load) user config
 if [ -f "${DIR_CONF}/config" ]
 then
     FILE_CONF="${DIR_CONF}/config"
+    # shellcheck source=config.example
     source "${FILE_CONF}"
 else
     # No existing config file was found; use default
@@ -444,37 +238,28 @@ fi
 
 # Set vars
 DIR_ROOT="$(git rev-parse --show-toplevel 2> /dev/null)"
-FILE_UPDATE="${DIR_DATA}/update"
 
 GIT_HASH="$(git rev-parse HEAD 2> /dev/null)"
 GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2> /dev/null)"
 
-ARGS=$@
-ARG_NOUPDATE=noupdate
-for ARG_LAST; do true; done
+# Set $1 to last argument.
+for _; do true; done
 
 case "$1" in
     get)
-        update-silent ${ARG_LAST}
         version-get
         ;;
     major)
-        update-silent ${ARG_LAST}
         version-major
         ;;
     minor)
-        update-silent ${ARG_LAST}
         version-minor
         ;;
     patch|next)
-        update-silent ${ARG_LAST}
         version-patch
         ;;
     debug)
         plugin-debug
-        ;;
-    update)
-        update
         ;;
     help)
         usage

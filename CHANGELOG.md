@@ -5,6 +5,15 @@ This file uses change log convention from [Keep a CHANGELOG](http://keepachangel
 
 ## [Unreleased][unreleased]
 
+## [3.0.1] - 2018-07-13
+### Fixed
+- Incorrect statements in README.
+- Shellcheck errors.
+
+## Removed
+- Unused helper functions and variables.
+
+## [3.0.0] - 2018-07-13
 ### Added
 - Support for the [XDG Base Directory Specification][xdg_basedirs]. Details:
   - Configuration will now prefer `$XDG_CONFIG_HOME/.git-semver/config` if it exists
@@ -12,7 +21,15 @@ This file uses change log convention from [Keep a CHANGELOG](http://keepachangel
   - The previous values for both files are now used as a fallback. 
     Existing files under `$HOME/.git-semver/` will continue to work as long as 
     the `$XDG_*` paths do not exist.
+- Support for installation to `$HOME/.local/bin/`.
+- Version prefix config.
+- Tag signing config.
 
+### Fixed
+- Make plugins executable and allow errors to be raised to user.
+
+### Removed
+- Built in updater. Updates can be done via a git pull.
 
 ## [2.0.2] - 2015-07-24
 ### Fixed
@@ -76,7 +93,9 @@ This file uses change log convention from [Keep a CHANGELOG](http://keepachangel
 [README.md]: README.md
 [xdg_basedirs]: http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
-[unreleased]: https://github.com/markchalloner/git-semver/compare/2.0.2...HEAD
+[unreleased]: https://github.com/markchalloner/git-semver/compare/3.0.1...HEAD
+[3.0.1]: https://github.com/markchalloner/git-semver/compare/3.0.0...3.0.1
+[3.0.0]: https://github.com/markchalloner/git-semver/compare/2.0.2...3.0.0
 [2.0.2]: https://github.com/markchalloner/git-semver/compare/2.0.1...2.0.2
 [2.0.1]: https://github.com/markchalloner/git-semver/compare/2.0.0...2.0.1
 [2.0.0]: https://github.com/markchalloner/git-semver/compare/1.1.2...2.0.0
